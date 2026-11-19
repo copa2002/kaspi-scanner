@@ -15,41 +15,48 @@
       video { display: block; width: 100%; height: 100%; }
       .scan-region { position: absolute; box-sizing: border-box; border: 2px solid #35d07f; box-shadow: 0 0 0 999px rgb(0 0 0 / 48%); touch-action: none; cursor: move; }
       .scan-region:focus-visible { outline: 2px solid white; outline-offset: 3px; }
-      .handle { position: absolute; width: 28px; height: 28px; padding: 0; margin: 0; border: 2px solid white; border-radius: 7px; background: #168a54; touch-action: none; }
-      .handle[data-handle="nw"] { top: -14px; left: -14px; cursor: nwse-resize; }
-      .handle[data-handle="ne"] { top: -14px; right: -14px; cursor: nesw-resize; }
-      .handle[data-handle="sw"] { bottom: -14px; left: -14px; cursor: nesw-resize; }
-      .handle[data-handle="se"] { right: -14px; bottom: -14px; cursor: nwse-resize; }
-      .scanner-controls { display: flex; gap: 8px; }
-      .scanner-controls button { flex: 1; }
+      .edge-handle { position: absolute; z-index: 1; box-sizing: border-box; min-width: 0; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; }
+      .edge-handle::after { position: absolute; display: block; content: ""; border-radius: 4px; background: #35d07f; }
+      .edge-handle[data-edge="top"], .edge-handle[data-edge="bottom"] { right: 12px; left: 12px; width: auto; height: 14px; }
+      .edge-handle[data-edge="top"] { top: -7px; cursor: ns-resize; }
+      .edge-handle[data-edge="bottom"] { bottom: -7px; cursor: ns-resize; }
+      .edge-handle[data-edge="top"]::after, .edge-handle[data-edge="bottom"]::after { top: 5px; right: 0; left: 0; height: 3px; }
+      .edge-handle[data-edge="left"], .edge-handle[data-edge="right"] { top: 12px; bottom: 12px; width: 14px; }
+      .edge-handle[data-edge="left"] { left: -7px; cursor: ew-resize; }
+      .edge-handle[data-edge="right"] { right: -7px; cursor: ew-resize; }
+      .edge-handle[data-edge="left"]::after, .edge-handle[data-edge="right"]::after { top: 0; bottom: 0; left: 5px; width: 3px; }
       button, input { box-sizing: border-box; width: 100%; min-height: 48px; margin: 6px 0; padding: 10px 12px; border: 0; border-radius: 10px; font: inherit; }
       button { color: var(--tg-theme-button-text-color, #fff); background: var(--tg-theme-button-color, #2481cc); }
       input { color: var(--tg-theme-text-color, #17212b); background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
       #status { min-height: 1.5em; opacity: .8; }
+      #result { margin: 16px 0; padding: 14px; border-radius: 12px; background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
+      #result img { display: block; width: 100%; max-height: 42vh; object-fit: contain; border-radius: 8px; }
+      #result h2 { margin-top: 0; font-size: 1.15rem; }
     </style>
   </head>
   <body>
     <main>
       <h1>Сканер заказа</h1>
-      <p>Потяните рамку одним пальцем, чтобы переместить область. Тяните за уголки, чтобы изменить её размер.</p>
+      <p>Потяните середину рамки, чтобы переместить её. Тяните за тонкую полоску по краю, чтобы изменить размер.</p>
       <div id="camera-stage" class="camera-stage" hidden>
         <video id="camera" autoplay muted playsinline></video>
         <div id="scan-region" class="scan-region" aria-label="Область сканирования">
-          <button class="handle" type="button" data-handle="nw" aria-label="Изменить верхний левый угол"></button>
-          <button class="handle" type="button" data-handle="ne" aria-label="Изменить верхний правый угол"></button>
-          <button class="handle" type="button" data-handle="sw" aria-label="Изменить нижний левый угол"></button>
-          <button class="handle" type="button" data-handle="se" aria-label="Изменить нижний правый угол"></button>
+          <button class="edge-handle" type="button" data-edge="top" aria-label="Потяните, чтобы изменить верхний край"></button>
+          <button class="edge-handle" type="button" data-edge="right" aria-label="Потяните, чтобы изменить правый край"></button>
+          <button class="edge-handle" type="button" data-edge="bottom" aria-label="Потяните, чтобы изменить нижний край"></button>
+          <button class="edge-handle" type="button" data-edge="left" aria-label="Потяните, чтобы изменить левый край"></button>
         </div>
       </div>
       <button id="start" type="button">Открыть камеру</button>
-      <div class="scanner-controls">
-        <button id="zoom-out" type="button" aria-label="Уменьшить область">Уменьшить область</button>
-        <button id="reset-region" type="button">Сбросить рамку</button>
-        <button id="zoom-in" type="button" aria-label="Увеличить область">Увеличить область</button>
-      </div>
       <label for="manual">Ручной ввод кода или артикула</label>
       <input id="manual" autocomplete="off" inputmode="text" placeholder="Номер заказа / штрихкод">
       <button id="send" type="button">Найти заказ</button>
+      <section id="result" aria-live="polite" hidden>
+        <h2 id="result-title"></h2>
+        <img id="result-image" alt="Фото товара" hidden>
+        <p id="result-description"></p>
+        <button id="next" type="button">Далее — следующий заказ</button>
+      </section>
       <p id="status" role="status" aria-live="polite"></p>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.1/umd/zxing-browser.min.js"></script>
@@ -63,15 +70,24 @@
       const scanRegion = document.querySelector("#scan-region");
       const status = document.querySelector("#status");
       const manual = document.querySelector("#manual");
+      const startButton = document.querySelector("#start");
+      const resultView = document.querySelector("#result");
+      const resultTitle = document.querySelector("#result-title");
+      const resultImage = document.querySelector("#result-image");
+      const resultDescription = document.querySelector("#result-description");
+      const nextButton = document.querySelector("#next");
+      const launchParams = new URLSearchParams(window.location.search);
+      const apiBase = launchParams.get("api");
+      const sessionToken = launchParams.get("session");
       const scanCanvas = document.createElement("canvas");
       const scanContext = scanCanvas.getContext("2d", { willReadFrequently: true });
       const MIN_REGION_SIZE = 0.16;
-      const MAX_REGION_SIZE = 0.96;
       let region = { x: 0.16, y: 0.28, width: 0.68, height: 0.42 };
       let stream;
       let detector;
       let zxReader;
       let scanning = false;
+      let submitting = false;
 
       function renderRegion() {
         scanRegion.style.left = `${region.x * 100}%`;
@@ -80,29 +96,15 @@
         scanRegion.style.height = `${region.height * 100}%`;
       }
 
-      function resizeRegion(factor) {
-        const width = Math.min(MAX_REGION_SIZE, Math.max(MIN_REGION_SIZE, region.width * factor));
-        const height = Math.min(MAX_REGION_SIZE, Math.max(MIN_REGION_SIZE, region.height * factor));
-        const centerX = region.x + region.width / 2;
-        const centerY = region.y + region.height / 2;
-        region = {
-          x: Math.min(1 - width, Math.max(0, centerX - width / 2)),
-          y: Math.min(1 - height, Math.max(0, centerY - height / 2)),
-          width,
-          height
-        };
-        renderRegion();
-      }
-
       function bindRegionGestures() {
         let drag;
         scanRegion.addEventListener("pointerdown", event => {
           if (event.button !== 0) return;
           event.preventDefault();
-          const handle = event.target.closest("[data-handle]")?.dataset.handle || "move";
+          const edge = event.target.closest("[data-edge]")?.dataset.edge || "move";
           drag = {
             pointerId: event.pointerId,
-            handle,
+            edge,
             clientX: event.clientX,
             clientY: event.clientY,
             start: { ...region }
@@ -117,32 +119,30 @@
           const dy = (event.clientY - drag.clientY) / bounds.height;
           const start = drag.start;
 
-          if (drag.handle === "move") {
+          if (drag.edge === "move") {
             region = {
               ...start,
               x: Math.min(1 - start.width, Math.max(0, start.x + dx)),
               y: Math.min(1 - start.height, Math.max(0, start.y + dy))
             };
-          } else {
-            const isWest = drag.handle.endsWith("w");
-            const isNorth = drag.handle.startsWith("n");
-            const fixedX = isWest ? start.x + start.width : start.x;
-            const fixedY = isNorth ? start.y + start.height : start.y;
-            const movingX = isWest ? start.x + dx : start.x + start.width + dx;
-            const movingY = isNorth ? start.y + dy : start.y + start.height + dy;
-            const left = isWest
-              ? Math.min(fixedX - MIN_REGION_SIZE, Math.max(0, movingX))
-              : fixedX;
-            const right = isWest
-              ? fixedX
-              : Math.max(fixedX + MIN_REGION_SIZE, Math.min(1, movingX));
-            const top = isNorth
-              ? Math.min(fixedY - MIN_REGION_SIZE, Math.max(0, movingY))
-              : fixedY;
-            const bottom = isNorth
-              ? fixedY
-              : Math.max(fixedY + MIN_REGION_SIZE, Math.min(1, movingY));
-            region = { x: left, y: top, width: right - left, height: bottom - top };
+          } else if (drag.edge === "left") {
+            const right = start.x + start.width;
+            const left = Math.min(right - MIN_REGION_SIZE, Math.max(0, start.x + dx));
+            region = { ...start, x: left, width: right - left };
+          } else if (drag.edge === "right") {
+            region.width = Math.max(
+              MIN_REGION_SIZE,
+              Math.min(1 - start.x, start.width + dx)
+            );
+          } else if (drag.edge === "top") {
+            const bottom = start.y + start.height;
+            const top = Math.min(bottom - MIN_REGION_SIZE, Math.max(0, start.y + dy));
+            region = { ...start, y: top, height: bottom - top };
+          } else if (drag.edge === "bottom") {
+            region.height = Math.max(
+              MIN_REGION_SIZE,
+              Math.min(1 - start.y, start.height + dy)
+            );
           }
           renderRegion();
         });
@@ -180,47 +180,80 @@
         stream = undefined;
       }
 
-      function submit(value) {
+      function showResult(result) {
+        resultTitle.textContent = result.order_number
+          ? `Заказ ${result.order_number}`
+          : "Результат поиска";
+        resultDescription.textContent = result.product_name || result.error || "";
+        resultImage.hidden = !result.image;
+        if (result.image) {
+          resultImage.src = `data:${result.image_type || "image/png"};base64,${result.image}`;
+        } else {
+          resultImage.removeAttribute("src");
+        }
+        resultView.hidden = false;
+        nextButton.textContent = result.error
+          ? "Сканировать ещё раз"
+          : "Далее — следующий заказ";
+        status.textContent = "";
+      }
+
+      async function submit(value) {
         const code = value.trim();
         if (!code) {
           status.textContent = "Введите или отсканируйте код.";
           return;
         }
-        if (telegram) {
-          telegram.sendData(code);
-        } else {
-          status.textContent = `Код: ${code}. Откройте страницу из Telegram-бота.`;
-        }
-      }
-
-      async function scanFrame() {
-        if (!scanning || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-          if (scanning) requestAnimationFrame(scanFrame);
+        scanning = false;
+        if (!apiBase || !sessionToken) {
+          stopCamera();
+          if (telegram) {
+            telegram.sendData(code);
+          } else {
+            status.textContent = `Код: ${code}. Откройте страницу из Telegram-бота.`;
+          }
           return;
         }
+        if (submitting) return;
+        submitting = true;
+        status.textContent = "Ищу заказ в PDF-листе на компьютере…";
         try {
-          const frame = getScanFrame();
-          let rawValue;
-          if (detector) {
-            const codes = await detector.detect(frame);
-            rawValue = codes[0]?.rawValue;
-          } else {
-            rawValue = zxReader.decodeFromCanvas(frame).getText();
+          const apiUrl = new URL("/api/lookup", apiBase);
+          if (apiUrl.protocol !== "https:") {
+            throw new Error("Для API требуется HTTPS.");
           }
-          if (rawValue) {
-            stopCamera();
-            submit(rawValue);
-            return;
+          const response = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${sessionToken}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ code })
+          });
+          const result = await response.json();
+          if (!response.ok) {
+            showResult({ error: result.error || "Не удалось найти заказ." });
+          } else {
+            showResult(result);
           }
         } catch (error) {
-          if (!isDecodeMiss(error)) {
-            status.textContent = "Не удалось прочитать кадр. Попробуйте ручной ввод.";
-          }
+          showResult({
+            error: "Не удалось подключиться к компьютеру. Проверьте, что бот и HTTPS-туннель запущены."
+          });
+        } finally {
+          submitting = false;
         }
-        if (scanning) requestAnimationFrame(scanFrame);
       }
 
-      document.querySelector("#start").addEventListener("click", async () => {
+      async function startCamera() {
+        if (scanning) return;
+        if (stream) {
+          resultView.hidden = true;
+          scanning = true;
+          status.textContent = "Камера включена. Наведите рамку на следующий код.";
+          requestAnimationFrame(scanFrame);
+          return;
+        }
         if (!navigator.mediaDevices?.getUserMedia) {
           status.textContent = "Браузер не предоставляет доступ к камере. Введите код вручную.";
           return;
@@ -243,6 +276,7 @@
             await video.play();
             cameraStage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
             scanning = true;
+            startButton.hidden = true;
             status.textContent = "Камера включена. Настройте рамку и наведите её на код.";
             requestAnimationFrame(scanFrame);
           } else if (window.ZXingBrowser?.BrowserMultiFormatReader) {
@@ -255,6 +289,7 @@
             await video.play();
             cameraStage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
             scanning = true;
+            startButton.hidden = true;
             status.textContent = "Камера включена. Настройте рамку и наведите её на код.";
             requestAnimationFrame(scanFrame);
           } else {
@@ -266,14 +301,49 @@
             ? "Нет разрешения на камеру. Разрешите доступ или введите код вручную."
             : "Не удалось запустить камеру. Проверьте HTTPS и разрешение браузера.";
         }
+      }
+
+      async function scanFrame() {
+        if (!scanning || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+          if (scanning) requestAnimationFrame(scanFrame);
+          return;
+        }
+        try {
+          const frame = getScanFrame();
+          let rawValue;
+          if (detector) {
+            const codes = await detector.detect(frame);
+            rawValue = codes[0]?.rawValue;
+          } else {
+            rawValue = zxReader.decodeFromCanvas(frame).getText();
+          }
+          if (rawValue) {
+            scanning = false;
+            await submit(rawValue);
+            return;
+          }
+        } catch (error) {
+          if (!isDecodeMiss(error)) {
+            status.textContent = "Не удалось прочитать кадр. Попробуйте ручной ввод.";
+          }
+        }
+        if (scanning) requestAnimationFrame(scanFrame);
+      }
+
+      startButton.addEventListener("click", startCamera);
+      nextButton.addEventListener("click", async () => {
+        resultView.hidden = true;
+        resultImage.removeAttribute("src");
+        manual.value = "";
+        if (stream) {
+          scanning = true;
+          status.textContent = "Наведите рамку на следующий код.";
+          requestAnimationFrame(scanFrame);
+        } else {
+          await startCamera();
+        }
       });
 
-      document.querySelector("#zoom-in").addEventListener("click", () => resizeRegion(0.82));
-      document.querySelector("#zoom-out").addEventListener("click", () => resizeRegion(1.22));
-      document.querySelector("#reset-region").addEventListener("click", () => {
-        region = { x: 0.16, y: 0.28, width: 0.68, height: 0.42 };
-        renderRegion();
-      });
       document.querySelector("#send").addEventListener("click", () => submit(manual.value));
       manual.addEventListener("keydown", event => {
         if (event.key === "Enter") submit(manual.value);
