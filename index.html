@@ -11,7 +11,17 @@
       body { margin: 0; padding: 20px; background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #17212b); }
       main { max-width: 520px; margin: auto; }
       h1 { font-size: 1.35rem; }
-      video { display: block; width: 100%; max-height: 58vh; margin: 16px 0; background: #111; border-radius: 12px; object-fit: cover; }
+      .camera-stage { position: relative; width: 100%; max-height: 58vh; margin: 16px 0; overflow: hidden; border-radius: 12px; background: #111; touch-action: none; }
+      video { display: block; width: 100%; height: 100%; }
+      .scan-region { position: absolute; box-sizing: border-box; border: 2px solid #35d07f; box-shadow: 0 0 0 999px rgb(0 0 0 / 48%); touch-action: none; cursor: move; }
+      .scan-region:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+      .handle { position: absolute; width: 28px; height: 28px; padding: 0; margin: 0; border: 2px solid white; border-radius: 7px; background: #168a54; touch-action: none; }
+      .handle[data-handle="nw"] { top: -14px; left: -14px; cursor: nwse-resize; }
+      .handle[data-handle="ne"] { top: -14px; right: -14px; cursor: nesw-resize; }
+      .handle[data-handle="sw"] { bottom: -14px; left: -14px; cursor: nesw-resize; }
+      .handle[data-handle="se"] { right: -14px; bottom: -14px; cursor: nwse-resize; }
+      .scanner-controls { display: flex; gap: 8px; }
+      .scanner-controls button { flex: 1; }
       button, input { box-sizing: border-box; width: 100%; min-height: 48px; margin: 6px 0; padding: 10px 12px; border: 0; border-radius: 10px; font: inherit; }
       button { color: var(--tg-theme-button-text-color, #fff); background: var(--tg-theme-button-color, #2481cc); }
       input { color: var(--tg-theme-text-color, #17212b); background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
@@ -21,9 +31,22 @@
   <body>
     <main>
       <h1>Сканер заказа</h1>
-      <p>Наведите камеру на QR-код или штрихкод. Если камера или формат не поддерживаются, введите код вручную.</p>
-      <video id="camera" autoplay muted playsinline hidden></video>
+      <p>Потяните рамку одним пальцем, чтобы переместить область. Тяните за уголки, чтобы изменить её размер.</p>
+      <div id="camera-stage" class="camera-stage" hidden>
+        <video id="camera" autoplay muted playsinline></video>
+        <div id="scan-region" class="scan-region" aria-label="Область сканирования">
+          <button class="handle" type="button" data-handle="nw" aria-label="Изменить верхний левый угол"></button>
+          <button class="handle" type="button" data-handle="ne" aria-label="Изменить верхний правый угол"></button>
+          <button class="handle" type="button" data-handle="sw" aria-label="Изменить нижний левый угол"></button>
+          <button class="handle" type="button" data-handle="se" aria-label="Изменить нижний правый угол"></button>
+        </div>
+      </div>
       <button id="start" type="button">Открыть камеру</button>
+      <div class="scanner-controls">
+        <button id="zoom-out" type="button" aria-label="Уменьшить область">Уменьшить область</button>
+        <button id="reset-region" type="button">Сбросить рамку</button>
+        <button id="zoom-in" type="button" aria-label="Увеличить область">Увеличить область</button>
+      </div>
       <label for="manual">Ручной ввод кода или артикула</label>
       <input id="manual" autocomplete="off" inputmode="text" placeholder="Номер заказа / штрихкод">
       <button id="send" type="button">Найти заказ</button>
@@ -36,16 +59,123 @@
       telegram?.expand();
 
       const video = document.querySelector("#camera");
+      const cameraStage = document.querySelector("#camera-stage");
+      const scanRegion = document.querySelector("#scan-region");
       const status = document.querySelector("#status");
       const manual = document.querySelector("#manual");
+      const scanCanvas = document.createElement("canvas");
+      const scanContext = scanCanvas.getContext("2d", { willReadFrequently: true });
+      const MIN_REGION_SIZE = 0.16;
+      const MAX_REGION_SIZE = 0.96;
+      let region = { x: 0.16, y: 0.28, width: 0.68, height: 0.42 };
       let stream;
       let detector;
-      let scannerControls;
+      let zxReader;
       let scanning = false;
+
+      function renderRegion() {
+        scanRegion.style.left = `${region.x * 100}%`;
+        scanRegion.style.top = `${region.y * 100}%`;
+        scanRegion.style.width = `${region.width * 100}%`;
+        scanRegion.style.height = `${region.height * 100}%`;
+      }
+
+      function resizeRegion(factor) {
+        const width = Math.min(MAX_REGION_SIZE, Math.max(MIN_REGION_SIZE, region.width * factor));
+        const height = Math.min(MAX_REGION_SIZE, Math.max(MIN_REGION_SIZE, region.height * factor));
+        const centerX = region.x + region.width / 2;
+        const centerY = region.y + region.height / 2;
+        region = {
+          x: Math.min(1 - width, Math.max(0, centerX - width / 2)),
+          y: Math.min(1 - height, Math.max(0, centerY - height / 2)),
+          width,
+          height
+        };
+        renderRegion();
+      }
+
+      function bindRegionGestures() {
+        let drag;
+        scanRegion.addEventListener("pointerdown", event => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          const handle = event.target.closest("[data-handle]")?.dataset.handle || "move";
+          drag = {
+            pointerId: event.pointerId,
+            handle,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            start: { ...region }
+          };
+          scanRegion.setPointerCapture(event.pointerId);
+        });
+
+        scanRegion.addEventListener("pointermove", event => {
+          if (!drag || drag.pointerId !== event.pointerId) return;
+          const bounds = cameraStage.getBoundingClientRect();
+          const dx = (event.clientX - drag.clientX) / bounds.width;
+          const dy = (event.clientY - drag.clientY) / bounds.height;
+          const start = drag.start;
+
+          if (drag.handle === "move") {
+            region = {
+              ...start,
+              x: Math.min(1 - start.width, Math.max(0, start.x + dx)),
+              y: Math.min(1 - start.height, Math.max(0, start.y + dy))
+            };
+          } else {
+            const isWest = drag.handle.endsWith("w");
+            const isNorth = drag.handle.startsWith("n");
+            const fixedX = isWest ? start.x + start.width : start.x;
+            const fixedY = isNorth ? start.y + start.height : start.y;
+            const movingX = isWest ? start.x + dx : start.x + start.width + dx;
+            const movingY = isNorth ? start.y + dy : start.y + start.height + dy;
+            const left = isWest
+              ? Math.min(fixedX - MIN_REGION_SIZE, Math.max(0, movingX))
+              : fixedX;
+            const right = isWest
+              ? fixedX
+              : Math.max(fixedX + MIN_REGION_SIZE, Math.min(1, movingX));
+            const top = isNorth
+              ? Math.min(fixedY - MIN_REGION_SIZE, Math.max(0, movingY))
+              : fixedY;
+            const bottom = isNorth
+              ? fixedY
+              : Math.max(fixedY + MIN_REGION_SIZE, Math.min(1, movingY));
+            region = { x: left, y: top, width: right - left, height: bottom - top };
+          }
+          renderRegion();
+        });
+
+        const stopDragging = event => {
+          if (drag?.pointerId === event.pointerId) drag = undefined;
+        };
+        scanRegion.addEventListener("pointerup", stopDragging);
+        scanRegion.addEventListener("pointercancel", stopDragging);
+      }
+
+      function getScanFrame() {
+        const sourceWidth = video.videoWidth;
+        const sourceHeight = video.videoHeight;
+        const left = Math.round(region.x * sourceWidth);
+        const top = Math.round(region.y * sourceHeight);
+        const width = Math.max(1, Math.round(region.width * sourceWidth));
+        const height = Math.max(1, Math.round(region.height * sourceHeight));
+        if (scanCanvas.width !== width || scanCanvas.height !== height) {
+          scanCanvas.width = width;
+          scanCanvas.height = height;
+        }
+        scanContext.drawImage(video, left, top, width, height, 0, 0, width, height);
+        return scanCanvas;
+      }
+
+      function isDecodeMiss(error) {
+        const kind = error?.constructor?.kind || error?.name;
+        return ["NotFoundException", "ChecksumException", "FormatException"].includes(kind);
+      }
 
       function stopCamera() {
         scanning = false;
-        scannerControls?.stop();
         stream?.getTracks().forEach(track => track.stop());
         stream = undefined;
       }
@@ -69,14 +199,23 @@
           return;
         }
         try {
-          const codes = await detector.detect(video);
-          if (codes.length && codes[0].rawValue) {
+          const frame = getScanFrame();
+          let rawValue;
+          if (detector) {
+            const codes = await detector.detect(frame);
+            rawValue = codes[0]?.rawValue;
+          } else {
+            rawValue = zxReader.decodeFromCanvas(frame).getText();
+          }
+          if (rawValue) {
             stopCamera();
-            submit(codes[0].rawValue);
+            submit(rawValue);
             return;
           }
-        } catch {
-          status.textContent = "Не удалось прочитать код. Попробуйте ручной ввод.";
+        } catch (error) {
+          if (!isDecodeMiss(error)) {
+            status.textContent = "Не удалось прочитать кадр. Попробуйте ручной ввод.";
+          }
         }
         if (scanning) requestAnimationFrame(scanFrame);
       }
@@ -87,7 +226,7 @@
           return;
         }
         try {
-          video.hidden = false;
+          cameraStage.hidden = false;
           if ("BarcodeDetector" in window) {
             const supported = await BarcodeDetector.getSupportedFormats();
             const formats = ["qr_code", "ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e"]
@@ -102,22 +241,22 @@
             });
             video.srcObject = stream;
             await video.play();
+            cameraStage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
             scanning = true;
-            status.textContent = "Камера включена. Наведите её на код.";
+            status.textContent = "Камера включена. Настройте рамку и наведите её на код.";
             requestAnimationFrame(scanFrame);
           } else if (window.ZXingBrowser?.BrowserMultiFormatReader) {
-            const reader = new ZXingBrowser.BrowserMultiFormatReader();
-            scannerControls = await reader.decodeFromConstraints(
-              { audio: false, video: { facingMode: { ideal: "environment" } } },
-              video,
-              result => {
-                if (result) {
-                  stopCamera();
-                  submit(result.getText());
-                }
-              }
-            );
-            status.textContent = "Камера включена. Наведите её на код.";
+            zxReader = new ZXingBrowser.BrowserMultiFormatReader();
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { facingMode: { ideal: "environment" } }
+            });
+            video.srcObject = stream;
+            await video.play();
+            cameraStage.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+            scanning = true;
+            status.textContent = "Камера включена. Настройте рамку и наведите её на код.";
+            requestAnimationFrame(scanFrame);
           } else {
             throw new Error("Scanner library did not load");
           }
@@ -129,10 +268,18 @@
         }
       });
 
+      document.querySelector("#zoom-in").addEventListener("click", () => resizeRegion(0.82));
+      document.querySelector("#zoom-out").addEventListener("click", () => resizeRegion(1.22));
+      document.querySelector("#reset-region").addEventListener("click", () => {
+        region = { x: 0.16, y: 0.28, width: 0.68, height: 0.42 };
+        renderRegion();
+      });
       document.querySelector("#send").addEventListener("click", () => submit(manual.value));
       manual.addEventListener("keydown", event => {
         if (event.key === "Enter") submit(manual.value);
       });
+      renderRegion();
+      bindRegionGestures();
       window.addEventListener("pagehide", stopCamera);
     </script>
   </body>
