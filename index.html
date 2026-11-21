@@ -7,11 +7,18 @@
     <title>Сканер Kaspi</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-      body { margin: 0; padding: 20px; background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #17212b); }
-      main { max-width: 520px; margin: auto; }
-      h1 { font-size: 1.35rem; }
-      .camera-stage { position: relative; width: 100%; max-height: 58vh; margin: 16px 0; overflow: hidden; border-radius: 12px; background: #111; touch-action: none; }
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--tg-theme-bg-color, #f3f5f7);
+        color: var(--tg-theme-text-color, #17212b);
+      }
+      * { box-sizing: border-box; }
+      body { min-height: 100vh; margin: 0; padding: max(20px, env(safe-area-inset-top)) 18px max(24px, env(safe-area-inset-bottom)); background: var(--tg-theme-bg-color, #f3f5f7); color: var(--tg-theme-text-color, #17212b); }
+      main { max-width: 520px; margin: 0 auto; }
+      h1 { margin: 8px 0 6px; font-size: 1.55rem; letter-spacing: -.03em; }
+      .intro { margin: 0 0 20px; color: var(--tg-theme-hint-color, #718096); line-height: 1.45; }
+      .camera-stage { position: relative; width: 100%; max-height: 58vh; margin: 16px 0; overflow: hidden; border-radius: 20px; background: #111; box-shadow: 0 12px 32px rgb(22 34 48 / 16%); touch-action: none; }
       video { display: block; width: 100%; height: 100%; }
       .scan-region { position: absolute; box-sizing: border-box; border: 2px solid #35d07f; box-shadow: 0 0 0 999px rgb(0 0 0 / 48%); touch-action: none; cursor: move; }
       .scan-region:focus-visible { outline: 2px solid white; outline-offset: 3px; }
@@ -25,19 +32,40 @@
       .edge-handle[data-edge="left"] { left: -7px; cursor: ew-resize; }
       .edge-handle[data-edge="right"] { right: -7px; cursor: ew-resize; }
       .edge-handle[data-edge="left"]::after, .edge-handle[data-edge="right"]::after { top: 0; bottom: 0; left: 5px; width: 3px; }
-      button, input { box-sizing: border-box; width: 100%; min-height: 48px; margin: 6px 0; padding: 10px 12px; border: 0; border-radius: 10px; font: inherit; }
-      button { color: var(--tg-theme-button-text-color, #fff); background: var(--tg-theme-button-color, #2481cc); }
+      button, input { width: 100%; min-height: 52px; margin: 6px 0; padding: 12px 16px; border: 0; border-radius: 14px; font: inherit; }
+      button { color: var(--tg-theme-button-text-color, #fff); background: var(--tg-theme-button-color, #2481cc); font-weight: 650; box-shadow: 0 5px 16px rgb(36 129 204 / 20%); cursor: pointer; }
+      button:active { transform: scale(.99); }
       input { color: var(--tg-theme-text-color, #17212b); background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
-      #status { min-height: 1.5em; opacity: .8; }
-      #result { margin: 16px 0; padding: 14px; border-radius: 12px; background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
-      #result img { display: block; width: 100%; max-height: 42vh; object-fit: contain; border-radius: 8px; }
-      #result h2 { margin-top: 0; font-size: 1.15rem; }
+      label { display: block; margin-top: 22px; font-size: .92rem; font-weight: 600; }
+      #status { min-height: 1.5em; color: var(--tg-theme-hint-color, #718096); text-align: center; }
+      #result[hidden], [hidden] { display: none !important; }
+      #result {
+        position: fixed;
+        z-index: 5;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: max(18px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
+        background: var(--tg-theme-bg-color, #f3f5f7);
+      }
+      #result h2 { flex: none; margin: 4px 0 0; font-size: 1.25rem; }
+      #result-description { flex: none; margin: 0; color: var(--tg-theme-hint-color, #718096); }
+      #result-image { display: block; flex: 1 1 auto; width: 100%; min-height: 0; object-fit: contain; border-radius: 18px; background: #101820; }
+      #next { flex: none; margin: 0; }
+      body.result-mode main > :not(#result) { display: none !important; }
+      body.result-mode { overflow: hidden; padding: 0; }
+      body.result-mode main { max-width: none; margin: 0; }
+      #scan-flash { position: fixed; z-index: 10; inset: 0; pointer-events: none; background: white; opacity: 0; }
+      #scan-flash.active { animation: scan-flash 180ms ease-out; }
+      @keyframes scan-flash { 0% { opacity: 0; } 30% { opacity: .85; } 100% { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { #scan-flash.active { animation-duration: 80ms; } }
     </style>
   </head>
   <body>
     <main>
       <h1>Сканер заказа</h1>
-      <p>Потяните середину рамки, чтобы переместить её. Тяните за тонкую полоску по краю, чтобы изменить размер.</p>
+      <p class="intro">Наведите камеру на штрихкод или QR-код заказа. Найденный товар откроется на весь экран.</p>
       <div id="camera-stage" class="camera-stage" hidden>
         <video id="camera" autoplay muted playsinline></video>
         <div id="scan-region" class="scan-region" aria-label="Область сканирования">
@@ -47,7 +75,7 @@
           <button class="edge-handle" type="button" data-edge="left" aria-label="Потяните, чтобы изменить левый край"></button>
         </div>
       </div>
-      <button id="start" type="button">Открыть камеру</button>
+      <button id="start" type="button">Сканировать заказ</button>
       <label for="manual">Ручной ввод кода или артикула</label>
       <input id="manual" autocomplete="off" inputmode="text" placeholder="Номер заказа / штрихкод">
       <button id="send" type="button">Найти заказ</button>
@@ -55,10 +83,11 @@
         <h2 id="result-title"></h2>
         <img id="result-image" alt="Фото товара" hidden>
         <p id="result-description"></p>
-        <button id="next" type="button">Далее — следующий заказ</button>
+        <button id="next" type="button">Сканировать следующий заказ</button>
       </section>
       <p id="status" role="status" aria-live="polite"></p>
     </main>
+    <div id="scan-flash" aria-hidden="true"></div>
     <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.1/umd/zxing-browser.min.js"></script>
     <script>
       const telegram = window.Telegram?.WebApp;
@@ -76,6 +105,7 @@
       const resultImage = document.querySelector("#result-image");
       const resultDescription = document.querySelector("#result-description");
       const nextButton = document.querySelector("#next");
+      const scanFlash = document.querySelector("#scan-flash");
       const launchParams = new URLSearchParams(window.location.search);
       const apiBase = launchParams.get("api");
       const sessionToken = launchParams.get("session");
@@ -178,12 +208,24 @@
         scanning = false;
         stream?.getTracks().forEach(track => track.stop());
         stream = undefined;
+        video.srcObject = null;
+        detector = undefined;
+        zxReader = undefined;
+      }
+
+      function flashAfterScan() {
+        scanFlash.classList.remove("active");
+        void scanFlash.offsetWidth;
+        scanFlash.classList.add("active");
+        window.setTimeout(() => scanFlash.classList.remove("active"), 220);
       }
 
       function showResult(result) {
+        stopCamera();
+        cameraStage.hidden = true;
         resultTitle.textContent = result.order_number
           ? `Заказ ${result.order_number}`
-          : "Результат поиска";
+          : result.error ? "Заказ не найден" : "Результат поиска";
         resultDescription.textContent = result.product_name || result.error || "";
         resultImage.hidden = !result.image;
         if (result.image) {
@@ -192,9 +234,10 @@
           resultImage.removeAttribute("src");
         }
         resultView.hidden = false;
+        document.body.classList.add("result-mode");
         nextButton.textContent = result.error
-          ? "Сканировать ещё раз"
-          : "Далее — следующий заказ";
+          ? "Попробовать ещё раз"
+          : "Сканировать следующий заказ";
         status.textContent = "";
       }
 
@@ -205,8 +248,9 @@
           return;
         }
         scanning = false;
+        stopCamera();
+        cameraStage.hidden = true;
         if (!apiBase || !sessionToken) {
-          stopCamera();
           if (telegram) {
             telegram.sendData(code);
           } else {
@@ -247,8 +291,10 @@
 
       async function startCamera() {
         if (scanning) return;
+        resultView.hidden = true;
+        document.body.classList.remove("result-mode");
+        manual.value = "";
         if (stream) {
-          resultView.hidden = true;
           scanning = true;
           status.textContent = "Камера включена. Наведите рамку на следующий код.";
           requestAnimationFrame(scanFrame);
@@ -319,6 +365,11 @@
           }
           if (rawValue) {
             scanning = false;
+            flashAfterScan();
+            status.textContent = "Код считан. Ищу заказ…";
+            cameraStage.hidden = true;
+            stopCamera();
+            await new Promise(resolve => window.setTimeout(resolve, 1000));
             await submit(rawValue);
             return;
           }
@@ -331,18 +382,7 @@
       }
 
       startButton.addEventListener("click", startCamera);
-      nextButton.addEventListener("click", async () => {
-        resultView.hidden = true;
-        resultImage.removeAttribute("src");
-        manual.value = "";
-        if (stream) {
-          scanning = true;
-          status.textContent = "Наведите рамку на следующий код.";
-          requestAnimationFrame(scanFrame);
-        } else {
-          await startCamera();
-        }
-      });
+      nextButton.addEventListener("click", startCamera);
 
       document.querySelector("#send").addEventListener("click", () => submit(manual.value));
       manual.addEventListener("keydown", event => {
