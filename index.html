@@ -213,6 +213,14 @@
         zxReader = undefined;
       }
 
+      function pauseCamera() {
+        scanning = false;
+        stream?.getVideoTracks().forEach(track => {
+          track.enabled = false;
+        });
+        video.pause();
+      }
+
       function flashAfterScan() {
         scanFlash.classList.remove("active");
         void scanFlash.offsetWidth;
@@ -221,7 +229,7 @@
       }
 
       function showResult(result) {
-        stopCamera();
+        pauseCamera();
         cameraStage.hidden = true;
         resultTitle.textContent = result.order_number
           ? `Заказ ${result.order_number}`
@@ -247,10 +255,10 @@
           status.textContent = "Введите или отсканируйте код.";
           return;
         }
-        scanning = false;
-        stopCamera();
+        pauseCamera();
         cameraStage.hidden = true;
         if (!apiBase || !sessionToken) {
+          stopCamera();
           if (telegram) {
             telegram.sendData(code);
           } else {
@@ -295,6 +303,11 @@
         document.body.classList.remove("result-mode");
         manual.value = "";
         if (stream) {
+          cameraStage.hidden = false;
+          stream.getVideoTracks().forEach(track => {
+            track.enabled = true;
+          });
+          await video.play();
           scanning = true;
           status.textContent = "Камера включена. Наведите рамку на следующий код.";
           requestAnimationFrame(scanFrame);
@@ -368,7 +381,7 @@
             flashAfterScan();
             status.textContent = "Код считан. Ищу заказ…";
             cameraStage.hidden = true;
-            stopCamera();
+            pauseCamera();
             await new Promise(resolve => window.setTimeout(resolve, 1000));
             await submit(rawValue);
             return;
